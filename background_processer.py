@@ -1,13 +1,15 @@
 from PIL import Image as pillow
+from PIL import ImageColor
 from pathlib import Path as path
-from rembg import remove, new_session
+
+import tkinter as tk
+from tkinter import filedialog
+import time
+
+import biref_process
 
 # Get Information -> Process VIA rembg + Save -> Process VIA pillow + Save
 # Information: input dir, rembg output dir, pillow output dir
-
-
-
-
 
 root_dir = ""
 input_directory_path = ""
@@ -16,8 +18,6 @@ background_directory_path = ""
 save_drive = False
 paste_background = False 
 background_hex = ""
-model_name = "birefnet-portrait"
-session = new_session(model_name)
 
 
 def main():
@@ -27,41 +27,73 @@ def main():
 
 
 def get_information():
+    global root_dir, input_directory_path, transparent_directory_path
+    global background_directory_path, save_drive, paste_background
+    global background_hex, process_rembg
+
+    root = tk.Tk()
+    root.withdraw()  # Hide the root window
+
+    print("-------------------- Program Parameters --------------------")
+
+    do_background = input("Do you want to put a background on images? ('yes' or 'no'): ")
+    if do_background == 'yes':
+        background_hex = input("What color do you want the background to be? (hex code): ")
+        paste_background = True
+    
+
     print("-------------------- Directory Inputs --------------------")
-    root_dir = input("Input the root directory with the 3 directories: ")
-    input_directory_path = f"{root_dir}{input("Input the local directory path for the pngs (Format: .\'directory_name'): ")}"
-    transparent_directory_path = f"{root_dir}{input("Input the local directory path to save the transparent images: ")}"
-    background_directory_path = f"{root_dir}{input("Input the local directory path to save the images w/ backgrounds: ")}"
+    print("Select your input directory...")
+    time.sleep(1)
+    input_directory_path = filedialog.askdirectory(title="Select Input Directory")
+
+
+    print("Select model output directory...")
+    time.sleep(1)
+    transparent_directory_path = filedialog.askdirectory(title="Select Transparent Output Directory")
+    
+    if paste_background:
+        print("Select background output directory...")
+        time.sleep(1)
+        background_directory_path = filedialog.askdirectory(title="Select Background Output Directory")
+
     print("-------------------- Other Information --------------------")
     save_google = input("Do you want to save to google drive? ('yes' or 'no'): ")
     if save_google == 'yes': save_drive = True
-    do_background = input("Do you want to put a background on images? ('yes' or 'no')")
-    if do_background == 'yes':
-        background_hex = input("What color do you want the background to be? (hex code)")
-        paste_background = True
+    
+    
 
 def process():
-    open_dir = path(input_directory_path).glob('*.png') #Open input PNG directory, take only .pngs
-    for img_path in open_dir.iterdir():
-        # Process through REMGB
-        img = pillow.open(img_path)
-        output = remove(img, session=session)
-        output.save(f"{transparent_directory_path}/{str(img_path)[:-4]}.png")
+    open_dir = path(transparent_directory_path).glob('*.png')
+    count = len([p for p in path(input_directory_path).iterdir() if p.is_file()])
 
+    # Process images through model
+    biref_process.process_images(input_directory_path, transparent_directory_path, count)
 
+    print("Finished model processing, starting background processing")
+
+    for img_path in open_dir:
         #Add Background colour
-        img = pillow.open(img_path).convert("RGBA")
-        new_img_data = []
-        bgColor = pillow.ImageColor.getrgb("#000338")
-        transparent = (0,0,0,0)
+        if paste_background:
+            source_path = transparent_directory_path if process_rembg else img_path
+            img = pillow.open(source_path).convert("RGBA")
+            
+            bgColor = ImageColor.getrgb(background_hex) + (255,)
+    
 
-        for data in img:
-            if data[:3] == transparent:
-                new_img_data.append(bgColor)
-            else:
-                new_img_data.append(data)
-        img.putdata(new_img_data)
-        img.save(f"/background_processed/{img_path}", "PNG")
+            new_img_data = []
+            for pixel in img.getdata():
+                if pixel[3] == 0:  # Transparent pixel
+                    new_img_data.append(bgColor)
+                else:
+                    new_img_data.append(pixel)
+
+            img.putdata(new_img_data) 
+
+            save_path = path(background_directory_path) / img_path.name
+            img.save(save_path, "PNG")
+
+
         print(f"Processed {img_path}")
     print("Done")
 
