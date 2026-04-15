@@ -40,7 +40,12 @@ def process_images(input_path, output_path):
 
     model_dtype = next(model.parameters()).dtype
 
-    for img_path in tqdm(image_paths, file=sys.stdout):
+    if device == "cpu":
+        print("WARNING: No GPU detected — running on CPU. Each image may take several minutes.\n")
+
+    pbar = tqdm(image_paths, file=sys.stdout)
+    for img_path in pbar:
+        pbar.set_description(img_path.name[:40])
         image = Image.open(img_path).convert("RGB")
         orig_size = image.size  # (width, height)
         image_np = np.array(image)
