@@ -1,3 +1,4 @@
+import sys
 import torch
 import cv2
 import numpy as np
@@ -9,30 +10,41 @@ from tqdm import tqdm
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-model = AutoModelForImageSegmentation.from_pretrained(
-    "ZhengPeng7/BiRefNet_dynamic",
-    trust_remote_code=True
-)
-
-model.to(device)
-model.eval()
-
 transform = transforms.Compose([
     transforms.Resize((1024, 1024)),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
 ])
 
+_model = None
+
+def _get_model():
+    """Load the model on first call, then return the cached instance."""
+    global _model
+    if _model is None:
+        print(f"Loading model onto {device}...")
+        _model = AutoModelForImageSegmentation.from_pretrained(
+            "ZhengPeng7/BiRefNet_dynamic",
+            trust_remote_code=True
+        )
+        _model.to(device)
+        _model.eval()
+        print("Model ready.\n")
+    return _model
+
+
 def process_images(input_path, output_path):
+    model = _get_model()
     image_paths = list(path(input_path).glob('*.png'))
     path(output_path).mkdir(parents=True, exist_ok=True)
 
-    for img_path in tqdm(image_paths):
+    model_dtype = next(model.parameters()).dtype
+
+    for img_path in tqdm(image_paths, file=sys.stdout):
         image = Image.open(img_path).convert("RGB")
         orig_size = image.size  # (width, height)
         image_np = np.array(image)
 
-        model_dtype = next(model.parameters()).dtype
         input_tensor = transform(image).unsqueeze(0).to(device=device, dtype=model_dtype)
 
         with torch.no_grad():
