@@ -8,7 +8,18 @@ from transformers import AutoModelForImageSegmentation
 from pathlib import Path as path
 from tqdm import tqdm
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+if not torch.cuda.is_available():
+    raise RuntimeError(
+        "CUDA not available — PyTorch cannot see your GPU.\n"
+        f"  torch version : {torch.__version__}\n"
+        f"  torch CUDA build: {torch.version.cuda}\n"
+        "Fix: reinstall PyTorch with CUDA support, e.g.:\n"
+        "  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128\n"
+        "(use cu128 for RTX 5090 / Blackwell; cu126 for older cards)"
+    )
+
+device = "cuda"
+print(f"GPU: {torch.cuda.get_device_name(0)}")
 
 transform = transforms.Compose([
     transforms.Resize((1024, 1024)),
@@ -25,10 +36,11 @@ def _get_model():
         print(f"Loading model onto {device}...")
         _model = AutoModelForImageSegmentation.from_pretrained(
             "ZhengPeng7/BiRefNet_dynamic",
-            trust_remote_code=True
+            trust_remote_code=True,
         )
         _model.to(device)
         _model.eval()
+        torch.cuda.synchronize()  # ensure model is fully resident on GPU before first inference
         print("Model ready.\n")
     return _model
 
@@ -39,9 +51,6 @@ def process_images(input_path, output_path):
     path(output_path).mkdir(parents=True, exist_ok=True)
 
     model_dtype = next(model.parameters()).dtype
-
-    if device == "cpu":
-        print("WARNING: No GPU detected — running on CPU. Each image may take several minutes.\n")
 
     pbar = tqdm(image_paths, file=sys.stdout)
     for img_path in pbar:
@@ -55,8 +64,9 @@ def process_images(input_path, output_path):
         with torch.no_grad():
             preds = model(input_tensor)
 
-        # BiRefNet returns a list of predictions; take the first scale's mask
-        mask = preds[0][0].squeeze().cpu().numpy()
+        # BiRefNet returns a list of predictions (coarse→fine); take the last (finest) scale.
+        # sigmoid converts raw logits to [0,1] probabilities — required for BiRefNet_dynamic.
+        mask = preds[-1][0].sigmoid().squeeze().cpu().numpy()
         mask = (mask > 0.5).astype(np.uint8) * 255
 
         # Resize mask back to original image dimensions
