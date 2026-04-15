@@ -32,7 +32,8 @@ def process_images(input_path, output_path):
         orig_size = image.size  # (width, height)
         image_np = np.array(image)
 
-        input_tensor = transform(image).unsqueeze(0).to(device)
+        model_dtype = next(model.parameters()).dtype
+        input_tensor = transform(image).unsqueeze(0).to(device=device, dtype=model_dtype)
 
         with torch.no_grad():
             preds = model(input_tensor)
