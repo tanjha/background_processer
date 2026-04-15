@@ -29,7 +29,7 @@ def main():
 def get_information():
     global root_dir, input_directory_path, transparent_directory_path
     global background_directory_path, save_drive, paste_background
-    global background_hex, process_rembg
+    global background_hex
 
     root = tk.Tk()
     root.withdraw()  # Hide the root window
@@ -64,19 +64,18 @@ def get_information():
     
 
 def process():
-    open_dir = path(transparent_directory_path).glob('*.png')
-    count = len([p for p in path(input_directory_path).iterdir() if p.is_file()])
-
     # Process images through model
-    biref_process.process_images(input_directory_path, transparent_directory_path, count)
+    biref_process.process_images(input_directory_path, transparent_directory_path)
 
     print("Finished model processing, starting background processing")
+
+    # Glob after model has written output files
+    open_dir = path(transparent_directory_path).glob('*.png')
 
     for img_path in open_dir:
         #Add Background colour
         if paste_background:
-            source_path = transparent_directory_path if process_rembg else img_path
-            img = pillow.open(source_path).convert("RGBA")
+            img = pillow.open(img_path).convert("RGBA")
             
             bgColor = ImageColor.getrgb(background_hex) + (255,)
     
