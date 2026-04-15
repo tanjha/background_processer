@@ -9,7 +9,7 @@ from tqdm import tqdm
 device = "cuda" if torch.cuda.is_available() else "cpu"
  
 model = AutoModelForImageSegmentation.from_pretrained(
-    "ZhengPeng7/BiRefNet-portrait",
+    "ZhengPeng7/BiRefNet_dynamic",
     trust_remote_code=True
 )
  
@@ -28,10 +28,10 @@ def process_images(input_path, output_path, total):
         orig_w, orig_h = image.size  # PIL size is (width, height)
  
         # Resize to the model's expected input size
-        resized = image.resize(MODEL_SIZE, Image.LANCZOS)
-        image_np = np.array(resized)
+        #resized = image.resize(MODEL_SIZE, Image.LANCZOS)
+        #image_np = np.array(resized)
  
-        input_tensor = torch.from_numpy(image_np).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+        input_tensor = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0).float() / 255.0
         input_tensor = input_tensor.to(device)
  
         with torch.no_grad():
