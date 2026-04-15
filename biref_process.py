@@ -2,6 +2,7 @@ import torch
 import cv2
 import numpy as np
 from PIL import Image
+from torchvision import transforms
 from transformers import AutoModelForImageSegmentation
 from pathlib import Path as path
 from tqdm import tqdm
@@ -16,21 +17,32 @@ model = AutoModelForImageSegmentation.from_pretrained(
 model.to(device)
 model.eval()
 
-def process_images(input_path, output_path, total):
-    open_dir = path(input_path).glob('*.png')
-    pbar = tqdm(total=total)
-    for img_path in open_dir:
-        image = Image.open(img_path).convert("RGB")
-        image_np = np.array(image)  # convert once, reuse for both tensor and RGBA
+transform = transforms.Compose([
+    transforms.Resize((1024, 1024)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
 
-        input_tensor = torch.from_numpy(image_np).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-        input_tensor = input_tensor.to(device)
+def process_images(input_path, output_path):
+    image_paths = list(path(input_path).glob('*.png'))
+    path(output_path).mkdir(parents=True, exist_ok=True)
+
+    for img_path in tqdm(image_paths):
+        image = Image.open(img_path).convert("RGB")
+        orig_size = image.size  # (width, height)
+        image_np = np.array(image)
+
+        input_tensor = transform(image).unsqueeze(0).to(device)
 
         with torch.no_grad():
-            output = model(input_tensor)[0]
+            preds = model(input_tensor)
 
-        mask = output.squeeze().cpu().numpy()
+        # BiRefNet returns a list of predictions; take the first scale's mask
+        mask = preds[0][0].squeeze().cpu().numpy()
         mask = (mask > 0.5).astype(np.uint8) * 255
+
+        # Resize mask back to original image dimensions
+        mask = cv2.resize(mask, orig_size, interpolation=cv2.INTER_LINEAR)
 
         rgba = cv2.cvtColor(image_np, cv2.COLOR_RGB2RGBA)
         rgba[:, :, 3] = mask
@@ -38,5 +50,6 @@ def process_images(input_path, output_path, total):
         save_path = path(output_path) / img_path.name
         cv2.imwrite(str(save_path), cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA))
 
-        pbar.update(1)
-    pbar.close()
+
+if __name__ == "__main__":
+    process_images("input", "output")
