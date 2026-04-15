@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 import cv2
 import numpy as np
 from PIL import Image
@@ -17,42 +16,36 @@ model = AutoModelForImageSegmentation.from_pretrained(
 model.to(device)
 model.eval()
  
-# The portrait model splits images into a 31x31 patch grid internally,
-# so both spatial dimensions must be divisible by 31.
-PATCH_MULTIPLE = 31
- 
-def pad_to_multiple(tensor, multiple=PATCH_MULTIPLE):
-    """Pad H and W up to the nearest multiple of `multiple` (right/bottom pad)."""
-    _, _, h, w = tensor.shape
-    pad_h = (multiple - h % multiple) % multiple
-    pad_w = (multiple - w % multiple) % multiple
-    if pad_h > 0 or pad_w > 0:
-        # F.pad order: (left, right, top, bottom)
-        tensor = F.pad(tensor, (0, pad_w, 0, pad_h), mode="reflect")
-    return tensor, h, w
+# BiRefNet-portrait was trained at this resolution.
+# Input must be resized to this size before inference.
+MODEL_SIZE = (1024, 1024)  # (width, height)
  
 def process_images(input_path, output_path, total):
     open_dir = path(input_path).glob('*.png')
     pbar = tqdm(total=total)
     for img_path in open_dir:
         image = Image.open(img_path).convert("RGB")
-        image_np = np.array(image)
+        orig_w, orig_h = image.size  # PIL size is (width, height)
+ 
+        # Resize to the model's expected input size
+        resized = image.resize(MODEL_SIZE, Image.LANCZOS)
+        image_np = np.array(resized)
  
         input_tensor = torch.from_numpy(image_np).permute(2, 0, 1).unsqueeze(0).float() / 255.0
         input_tensor = input_tensor.to(device)
  
-        # Pad to a size the model can handle, remember original dims to crop back
-        padded_tensor, orig_h, orig_w = pad_to_multiple(input_tensor)
- 
         with torch.no_grad():
-            output = model(padded_tensor)[0]
+            output = model(input_tensor)[0]
  
-        # Crop the mask back to the original image dimensions
+        # output mask is at model resolution — resize back to original
         mask = output.squeeze().cpu().numpy()
-        mask = mask[:orig_h, :orig_w]
         mask = (mask > 0.5).astype(np.uint8) * 255
+        mask = cv2.resize(mask, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
+        mask = (mask > 127).astype(np.uint8) * 255  # re-threshold after resize
  
-        rgba = cv2.cvtColor(image_np, cv2.COLOR_RGB2RGBA)
+        # Apply mask to original full-resolution image
+        orig_np = np.array(image)
+        rgba = cv2.cvtColor(orig_np, cv2.COLOR_RGB2RGBA)
         rgba[:, :, 3] = mask
  
         save_path = path(output_path) / img_path.name
