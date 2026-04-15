@@ -1,3 +1,4 @@
+import sys
 import torch
 import cv2
 import numpy as np
@@ -27,12 +28,13 @@ def process_images(input_path, output_path):
     image_paths = list(path(input_path).glob('*.png'))
     path(output_path).mkdir(parents=True, exist_ok=True)
 
-    for img_path in tqdm(image_paths):
+    model_dtype = next(model.parameters()).dtype
+
+    for img_path in tqdm(image_paths, file=sys.stdout):
         image = Image.open(img_path).convert("RGB")
         orig_size = image.size  # (width, height)
         image_np = np.array(image)
 
-        model_dtype = next(model.parameters()).dtype
         input_tensor = transform(image).unsqueeze(0).to(device=device, dtype=model_dtype)
 
         with torch.no_grad():
