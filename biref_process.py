@@ -16,20 +16,12 @@ model = AutoModelForImageSegmentation.from_pretrained(
 model.to(device)
 model.eval()
  
-# BiRefNet-portrait was trained at this resolution.
-# Input must be resized to this size before inference.
-MODEL_SIZE = (1024, 1024)  # (width, height)
- 
 def process_images(input_path, output_path, total):
     open_dir = path(input_path).glob('*.png')
     pbar = tqdm(total=total)
     for img_path in open_dir:
         image = Image.open(img_path).convert("RGB")
         orig_w, orig_h = image.size  # PIL size is (width, height)
- 
-        # Resize to the model's expected input size
-        #resized = image.resize(MODEL_SIZE, Image.LANCZOS)
-        #image_np = np.array(resized)
  
         input_tensor = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0).float() / 255.0
         input_tensor = input_tensor.to(device)
