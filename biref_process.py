@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 from PIL import Image
 from torchvision import transforms
+from transformers import AutoModelForImageSegmentation
 from pathlib import Path as path
 from tqdm import tqdm
 
@@ -20,29 +21,22 @@ if not torch.cuda.is_available():
 device = "cuda"
 print(f"GPU: {torch.cuda.get_device_name(0)}")
 
-_normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-_to_tensor = transforms.ToTensor()
+transform = transforms.Compose([
+    transforms.Resize((1024, 1024)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
 
 _model = None
-
-
-def _inference_size(orig_h, orig_w, ref=1024):
-    """Scale longest edge to ref, keeping both dims divisible by 32 (MODNet requirement)."""
-    scale = min(ref / max(orig_h, orig_w), 1.0)
-    new_h = max(32, int(orig_h * scale) // 32 * 32)
-    new_w = max(32, int(orig_w * scale) // 32 * 32)
-    return new_h, new_w
 
 
 def _get_model():
     global _model
     if _model is None:
-        print("Loading MODNet (photographic portrait matting)...")
-        _model = torch.hub.load(
-            "ZHKKKe/MODNet",
-            "modnet_photographic_portrait_matting",
-            pretrained=True,
-            trust_repo=True,
+        print("Loading RMBG-2.0 (portrait background removal)...")
+        _model = AutoModelForImageSegmentation.from_pretrained(
+            "briaai/RMBG-2.0",
+            trust_remote_code=True,
         )
         _model.to(device)
         _model.eval()
@@ -60,26 +54,23 @@ def process_images(input_path, output_path):
     for img_path in pbar:
         pbar.set_description(img_path.name[:40])
         image = Image.open(img_path).convert("RGB")
-        orig_w, orig_h = image.size  # PIL size is (width, height)
+        orig_size = image.size  # (width, height)
+        image_np = np.array(image)
 
-        # Resize to a MODNet-compatible resolution (both dims divisible by 32)
-        inf_h, inf_w = _inference_size(orig_h, orig_w)
-        resized = image.resize((inf_w, inf_h), Image.LANCZOS)
-
-        img_tensor = _normalize(_to_tensor(resized)).unsqueeze(0).to(device)
+        input_tensor = transform(image).unsqueeze(0).to(device)
 
         with torch.no_grad():
-            # MODNet returns (semantic, detail, matte); inference=True skips training branches
-            _, _, matte = model(img_tensor, inference=True)
+            preds = model(input_tensor)
 
-        # matte: [1, 1, H, W], values already in [0, 1] — no sigmoid needed
-        matte_np = matte.squeeze().cpu().numpy()
-        alpha = cv2.resize(matte_np, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
-        alpha = (alpha * 255).astype(np.uint8)
+        # Model returns a list (coarse→fine); last element is the finest prediction.
+        # sigmoid converts raw logits to [0,1] probabilities.
+        mask = preds[-1][0].sigmoid().squeeze().cpu().numpy()
+        mask = (mask > 0.5).astype(np.uint8) * 255
 
-        image_np = np.array(image)
+        mask = cv2.resize(mask, orig_size, interpolation=cv2.INTER_LINEAR)
+
         rgba = cv2.cvtColor(image_np, cv2.COLOR_RGB2RGBA)
-        rgba[:, :, 3] = alpha
+        rgba[:, :, 3] = mask
 
         save_path = path(output_path) / img_path.name
         cv2.imwrite(str(save_path), cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA))
